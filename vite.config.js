@@ -12,7 +12,11 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
+      vue: 'vue/dist/vue.esm-bundler.js',
       '@': fileURLToPath(new URL('./src', import.meta.url))
     },
   },
+  server: {
+    allowedHosts: ['680f-37-99-32-122.ngrok-free.app']
+  }
 })

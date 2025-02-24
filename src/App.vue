@@ -70,6 +70,72 @@
           <button class="nebula-btn" @click="toggleResizable(true)">▦</button>
         </div>
       </div>
+
+      <div v-if="selectedElement" class="typography">
+          <label>Typography</label>
+          <div class="controls">
+              <div class="sidebar select">
+                <button
+                  class="toggle-btn select"
+                  @click="toggleList"
+                >
+                  {{ showList ? 'Скрыть список' : 'Показать список' }}
+                </button>
+                <div v-if="showList" class="list-container">
+                  <input 
+                  type="text"
+                  class="search-family" 
+                  placeholder="⌕"
+                  v-model="searchQuery" 
+                  @input="fetchGoogleFonts(searchQuery)">
+                  <RecycleScroller
+                    :items="fonts"
+                    :item-size="40"
+                    :keeps="10"
+                    key-field="family"
+                    class="scroller"
+                  >
+                    <template #default="{ item, index }">
+                      <FontItem :data="item" :index="index" :key="item.family" @click="chooseFont(item)"/>
+                    </template>
+                  </RecycleScroller>
+                </div>
+              </div>
+              <select class="select" @change="chooseFontTypes($event.target.value)">
+                <option v-for="(value, key) in fontTypes" :key="key" :value="key">
+                  {{ key }}
+                </option>
+              </select>
+              <div class="sizeDiv">
+                <input 
+                  type="number" 
+                  class="input-select"
+                  :value="selectedElement.fontSize" 
+                  @input="chooseFontSize($event.target.value)" 
+                  placeholder="Введите размер"
+                />
+                <select class="select-size" @change="chooseFontSize($event.target.value)">
+                    <option v-for="size in typographyStandartTextSize" :value="size">
+                      {{ size }}
+                    </option>
+                </select>
+              </div>
+          </div>
+          <!-- <div class="controls">
+              <label>Line height</label>
+              <input type="text" class="button" value="142.1%">
+          </div>
+          <div class="controls">
+              <label>Letter spacing</label>
+              <input type="text" class="button" value="0%">
+          </div>
+          <div class="alignment">
+              <button>⏴</button>
+              <button>⏵</button>
+              <button>⏷</button>
+              <button>⏶</button>
+          </div> -->
+      </div>
     </pane>
 
     <!-- Область конструктора -->
@@ -162,8 +228,13 @@ import 'splitpanes/dist/splitpanes.css';
 import interact from 'interactjs';
 import "vue-zoomable/dist/style.css";
 import { VueZoomable, ScrollOverlay } from "vue-zoomable";
+import { RecycleScroller } from 'vue3-virtual-scroller'
+import 'vue3-virtual-scroller/dist/vue3-virtual-scroller.css'
+import opentype from 'opentype.js'
 
 let dxsum = 0, dysum = 0;
+
+const typographyStandartTextSize = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 26, 28, 36, 48, 72];
 
 const zoom = ref(1);
 const pan = ref({ x: 100, y: 100 });
@@ -178,12 +249,131 @@ const isPanEnabled = ref(true);
 // Список элементов (текстов)
 const elements = ref([]);
 
+const fontTypes = ref([]);
+
 // Выбранный элемент
 const selectedElement = ref(null);
 
 const addMode = ref(false);
 
 const whatsMode = ref({});
+
+const showList = ref(false);
+
+const searchQuery = ref("");
+
+const toggleList = () => {
+  showList.value = !showList.value;
+}
+
+const chooseFontSize = (size) => {
+  const elDom = document.querySelector(`[data-id="${selectedElement.value.id}"]`);
+  elDom.style.fontSize = `${size}px`;
+  selectedElement.value.fontSize = size;
+}
+
+const chooseFontTypes = (value) => {
+  const elDom = document.querySelector(`[data-id="${selectedElement.value.id}"]`);
+
+  const match = value.match(/^(\d+)?([a-zA-Z]*)$/);
+
+  if (!match) return { number: null, text: input };
+
+  elDom.style.fontWeight = match[1] ? parseInt(match[1]) : null;
+  elDom.style.fontStyle = match[2] || null;
+
+  elDom.style.fontWeight = value;
+}
+
+const chooseFont = async (item) => {
+  const font = new FontFace(item.family, `url(${item.url})`);
+
+  await font.load();
+  document.fonts.add(font);
+
+  fontTypes.value = item.urls;
+
+  const elDom = document.querySelector(`[data-id="${selectedElement.value.id}"]`);
+  elDom.style.fontFamily = `${item.family}, ${item.category}`;
+}
+
+const FontItem = {
+  props: ['data', 'index'],
+  data() {
+    return {
+      pathData: '',
+      loading: false,
+      error: null
+    }
+  },
+  async mounted() {
+    if (!this.data.url) return;
+    if (this.data.samplePath) {
+      this.pathData = this.data.samplePath;
+      return;
+    }
+    this.loading = true;
+    try {
+      const font = await opentype.load(this.data.url);
+      const sampleText = this.data.family;
+      const path = font.getPath(sampleText, 0, 40, 16);
+      this.pathData = path.toPathData();
+      this.data.samplePath = this.pathData;
+    } catch (err) {
+      console.error(`Ошибка генерации пути для ${this.data.family}:`, err);
+      this.error = err.message;
+    } finally {
+      this.loading = false;
+    }
+  },
+  template: `
+    <div class="font-item">
+      <div v-if="loading">Загрузка...</div>
+      <div v-else-if="error">Ошибка: {{ error }}</div>
+      <svg v-else viewBox="20 25 50 20" xmlns="http://www.w3.org/2000/svg" class="svg-sample">
+        <path :d="pathData" fill="white" />
+      </svg>
+    </div>
+  `
+}
+
+const fonts = ref([])
+
+// Пример запроса к Google Fonts API
+const API_KEY = 'AIzaSyAtNI3mbv91QvzmDi8SEGJCp-QDcPxMwnw'
+const apiUrl = `https://www.googleapis.com/webfonts/v1/webfonts?key=${API_KEY}`
+
+const fetchGoogleFonts = async (searchQuery) => {
+  try {
+    const response = await fetch(apiUrl)
+    const data = await response.json()
+
+    const uniqueFonts = {}
+    data.items.forEach(item => {
+      if(item.subsets && item.subsets.includes('cyrillic')){
+        if(!uniqueFonts[item.family]) {
+          uniqueFonts[item.family] = item
+        }
+      }
+    })
+
+    const query = searchQuery.toLowerCase().trim();
+
+    fonts.value = Object.values(uniqueFonts)
+    .map((item, index) => ({
+      id: index,
+      family: item.family,
+      url: item.files.regular || Object.values(item.files)[0],
+      urls: item.files,
+      category: item.category,
+      samplePath: null
+    }))
+    .filter(font => !query || font.family.toLowerCase().includes(query));
+
+  } catch (error) {
+    console.error('Ошибка получения списка шрифтов:', error)
+  }
+}
 
 let scope = ref([
   {x: 8, y: 8, maxX: -15, maxY: -8, equX: 0, equY: 0}
@@ -223,6 +413,11 @@ const align = (alignment) => {
       height: canvasSize.height
     };
 
+    const element = document.querySelector(`[data-id="${selectedElement.value.id}"]`);
+    const rect = element.getBoundingClientRect();
+    
+    selectedElement.value.width = rect.width;
+    selectedElement.value.height = rect.height;
     let B = selectedElement.value;
 
     switch (alignment) {
@@ -270,8 +465,8 @@ const align = (alignment) => {
             throw new Error("Unknown alignment type");
     }
 
-    [B.x, B.y] = [x, y];
-    [dxsum, dysum] = [x, y];
+    [B.x, B.y] = [Math.floor(x), Math.floor(y)];
+    [dxsum, dysum] = [Math.floor(x), Math.floor(y)];
     console.log(selectedElement.value);
 }
 
@@ -294,7 +489,8 @@ const addText = () => {
       height: 46,
       isEditing: false,
       isWidthResizable: false,
-      isHeightResizable: false
+      isHeightResizable: false,
+      fontSize: 24
   };
 };
 
@@ -358,43 +554,81 @@ const selectElement = (el) => {
 
 const generateHTML = () => {
   let html = `<html>
-              \  <head>
-              \   <style>
-                      html, body {
-                        margin: 0;
-                        padding: 0;
-                        display: flex;
-                        justify-content: center;
-                        align-items: center;
-                        background: #1e1e1e; /* Для наглядности */
-                      }
-
-                      .canvas {
-                        position: relative;
-                        width: ${canvasSize.width}px;
-                        height: ${canvasSize.height}px;
-                        background: white;
-                        border: 1px solid #ccc;
-                      }
-              \        .text { position: absolute; font-size: 20px; cursor: move; }
-              \      </style>
-              \  </head>
-              \<body>
-              \<div class="canvas">`;
-
+  <head>
+    <meta charset="UTF-8">
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        background: #1e1e1e;
+      }
+      .canvas {
+        position: relative;
+        width: ${canvasSize.width}px;
+        height: ${canvasSize.height}px;
+        background: white;
+        border: 1px solid #ccc;
+      }
+      .text {
+        position: absolute;
+        white-space: pre-line;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="canvas">`;
 
   elements.value.forEach((el) => {
-    html += `<div class="text" style="left: ${el.x}px; top: ${el.y}px;">${el.text}</div>\n`;
+    if (el.type === "table") {
+        html += `<table class="custom-table" style="
+          left: ${el.x}px; 
+          top: ${el.y}px;
+          font-size: ${el.fontSize || 16}px;
+          font-family: ${el.fontFamily || 'sans-serif'};
+          position: absolute;
+          border-collapse: collapse;
+        ">`;
+
+        console.log(el);
+
+        el.rows.forEach((row) => {
+            html += "<tr>";
+            if (Array.isArray(row)) {
+                row.forEach((cell) => {
+                    html += `<td style="border: 1px solid black; padding: 5px;">${cell}</td>`;
+                });
+            }
+            html += "</tr>";
+        });
+
+        html += "</table>\n";
+    } else {
+        html += `<div class="text" style="
+          left: ${el.x}px; 
+          top: ${el.y}px; 
+          font-size: ${el.fontSize || 20}px; 
+          font-family: ${el.fontFamily || 'sans-serif'};
+          position: absolute;
+        ">${el.text}</div>\n`;
+    }
   });
 
-  html += `</div>\n</body>\n</html>`;
+  html += `</div>
+  </body>
+</html>`;
 
   // Создание и скачивание файла
   const blob = new Blob([html], { type: "text/html" });
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);
   link.download = "canvas.html";
+  document.body.appendChild(link);
   link.click();
+  document.body.removeChild(link);
 };
 
 document.addEventListener('click', (event) => {
@@ -561,6 +795,8 @@ onMounted(() => {
     invert: 'reposition'
   });
   window.addEventListener('keydown', inputKey);
+
+  fetchGoogleFonts("");
 });
 
 onBeforeUnmount(() => {
@@ -580,6 +816,7 @@ onBeforeUnmount(() => {
   padding: 10px;
   background: #2c2c2c;
   display: flex;
+  overflow-y: auto;
   flex-direction: column;
   gap: 10px;
   color: white;
@@ -603,6 +840,11 @@ onBeforeUnmount(() => {
   align-items: center;
   background: #1e1e1e;
 }
+
+#vue-zoomable {
+  overflow-y: auto;
+}
+
 .canva {
   position: relative;
   flex-shrink: 0;
@@ -665,7 +907,7 @@ onBeforeUnmount(() => {
 .alignment-btn {
   width: 32px;
   height: 32px;
-  background: #3c3c3c;
+  background: #dfdfdf;
   background-size: 30px 30px;
   background-size: contain;
   filter: invert(1);
@@ -828,6 +1070,108 @@ onBeforeUnmount(() => {
 /* Активное состояние (для примера) */
 .alignment-btn:active {
   background: #5c5c5c;
+}
+
+.list-container {
+  width: 240px;
+  height: 300px;
+  margin: 10px;
+}
+.font-item {
+  margin-bottom: 10px; /* уменьшенный отступ между элементами */
+  padding-bottom: 5px;
+}
+.svg-sample {
+  width: 100%; /* уменьшаем ширину SVG */
+  height: 40px;
+}
+.scroller {
+  height: 280px; /* фиксированная высота для скролла */
+  overflow-y: auto;
+  border: 1px solid #000;
+}
+
+.typography {
+    font-family: "Bellota Text", sans-serif;
+    font-weight: bold;
+    font-size: 24px;
+    line-height: 142.1%;
+    letter-spacing: 0%;
+    text-align: left;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    color: white;
+    border-radius: 8px;
+    width: 100%;
+}
+
+.controls {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.select, .button {
+    background: #333;
+    color: white;
+    border: none;
+    padding: 5px;
+    border-radius: 4px;
+    font-size: 14px;
+    cursor: pointer;
+}
+
+.sizeDiv {
+  display: flex;
+  border-radius: 4px;
+}
+
+.input-select {
+  background-color: #333; /* Или прозрачный */
+  color: white;
+  font-size: 16px;
+  border: none;
+  width: 80%;
+}
+
+.select-size {
+  background-color: #333; /* Или прозрачный */
+  color: white;
+  border: none;
+  padding: 5px 30px 5px 5px; /* Отступ справа для стрелки */
+  width: 20%; /* Узкий размер */
+  text-indent: -9999px; /* Скрываем текст */
+  white-space: nowrap; /* Не даем тексту переноситься */
+  cursor: pointer;
+  position: relative;
+}
+
+.search-family {
+  width: 100%;
+  padding: 5px;
+  background: #111111;
+  border: none;
+  color: white;
+  text-align: center;
+  border-radius: 4px;
+}
+
+.toggle-btn {
+  width: 100%;
+}
+
+.alignment {
+    display: flex;
+    justify-content: space-between;
+}
+
+.alignment button {
+    background: #444;
+    padding: 5px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
 }
 
 .alignment-btn.left {
