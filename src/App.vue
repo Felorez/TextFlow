@@ -1,14 +1,122 @@
 <template>
   <splitpanes class="app">
     <!-- Панель управления -->
-    <pane class="panel" max-size="33.33%" min-size="17%" size="20%">
-      <label>Ширина: <input type="number" v-model="canvasSize.width" @change="updateCanvasSize" /></label>
-      <label>Высота: <input type="number" v-model="canvasSize.height" @change="updateCanvasSize" /></label>
-      
-      <button @click="addText">Добавить текст</button>
-      <button @click="addTable">Добавить таблицу</button>
-      <button @click="generateHTML">Сохранить HTML</button>
+    <pane class="panel" max-size="20%" min-size="17%" size="20%">
+      <div class="add-panel-container">
+        <button class="add-btn-panel add-text-btn" @click="addText"></button>
+        <button class="add-btn-panel add-table-btn" @click="addTable"></button>
+        <button class="add-btn-panel save-html-btn" @click="generateHTML"></button>
+      </div>
 
+      <div class="nebula-row">
+        <input 
+        class="nebula-input" 
+        type="text" 
+        v-model.number="canvasSize.width"
+        @change="updateCanvasSize"/>
+        <span style="margin: 0 5px;">x</span>
+        <input 
+        class="nebula-input" 
+        type="text" 
+        v-model.number="canvasSize.height"
+        @change="updateCanvasSize"/>
+      </div>
+
+      <div class="editor-container">
+        <textarea
+          v-model="code"
+          class="nebula-textarea"
+          @keydown.tab.prevent="insertTab"
+          @input="validateJSON"
+          spellcheck="false"
+        ></textarea>
+        <pre class="code-output" v-html="highlightedCode"></pre>
+        <div v-if="error" class="error-message">{{ error }}</div>
+      </div>
+    </pane>
+
+    <!-- Область конструктора -->
+    <pane class="constructor">
+      <ScrollOverlay
+        wheel-unlock-key="Control"
+        style="width: 100%; height: 100%;"
+      >
+        <template #overlay>
+          <VueZoomable 
+          id="vue-zoomable"
+          selector="#canvas"
+          style="width: 100%; height: 100%;"
+          :class="{ 'add-text-cursor': addMode }"
+          :minZoom="0.3"
+          :maxZoom="2"
+          :dblClickZoomStep="0"
+          :wheelZoomStep="0.05"
+          :pan-enabled=isPanEnabled
+          :enableControlButton="false"
+          v-model:pan="pan"
+          v-model:zoom="zoom">
+            <div id="canvas">
+              <div class="ruler-wrapper">
+                <div class="ruler horizontal">
+                  <div class="ruler-controls ruler-control" :style="{ position: 'absolute', left: rulerControl.x + 'px' }">
+                  </div>
+                  <div v-for="mark in horizontalMarks" :key="mark" class="ruler-mark" :style="{ left: mark + 'px' }">
+                    <span class="ruler-label" v-if="mark % 50 === 0">{{ mark }}</span>
+                  </div>
+                </div>
+              </div>
+              <div 
+              class="canva"
+              :style="{ 
+                width: canvasSize.width + 'px', 
+                height: canvasSize.height + 'px'
+              }"
+              @click="onCanvasClick">
+                <div 
+                v-for="el in elements"
+                :key="el.id"
+                class="container-element"
+                >
+                  <div
+                    v-if="'text' in el"
+                    class="text resizable"
+                    :data-id="el.id"
+                    :class="{ selected: selectedElement && selectedElement.id === el.id }"
+                    :style="style(el)"
+                    :contenteditable="el.isEditing"
+                    @dblclick="el.isEditing = true"
+                    @blur="el.isEditing = false"
+                    @input="inputText($event, el)"
+                    @click="selectElement(el)"
+                    @mousedown="selectElement(el)"
+                  >
+                  {{ el.text }}
+                  </div>
+                  <table
+                   v-if="'rows' in el"
+                   contenteditable="true" 
+                   class="table-element resizable"
+                   :data-id="el.id"
+                   :style="style(el)"
+                   @input="(e) => onTableInput(e, el)">
+                    <tr v-for="(row, rowIndex) in el.rows" :key="rowIndex">
+                      <td
+                        v-for="(cell, cellIndex) in row"
+                        :key="cellIndex"
+                        contenteditable="true"
+                      >
+                        {{ cell }}
+                      </td>
+                    </tr>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </VueZoomable>
+        </template>
+      </ScrollOverlay>
+    </pane>
+    <pane class="panel" max-size="33.33%" min-size="17%" size="20%"> 
       <div class="alignment-panel" v-if="selectedElement">
         <div class="alignment-group">
           <button @click="align('left')" class="alignment-btn left" title="Align Left"></button>
@@ -21,6 +129,9 @@
           <button @click="align('middle')" class="alignment-btn middle" title="Align Middle"></button>
           <button @click="align('bottom')" class="alignment-btn bottom" title="Align Bottom"></button>
         </div>
+      </div>
+      <div style="color: rgba(255, 255, 255, 0.5); font-size: 24px;" v-else>
+        Выберите элемент
       </div>
 
       <div class="position-panel" v-if="selectedElement">
@@ -135,102 +246,25 @@
               <button>⏷</button>
               <button>⏶</button>
           </div> -->
-      </div>
-    </pane>
-
-    <!-- Область конструктора -->
-    <pane class="constructor">
-      <ScrollOverlay
-        wheel-unlock-key="Control"
-        style="width: 100%; height: 100%;"
-      >
-        <template #overlay>
-          <VueZoomable 
-          id="vue-zoomable"
-          selector="#canvas"
-          style="width: 100%; height: 100%;"
-          :class="{ 'add-text-cursor': addMode }"
-          :minZoom="0.3"
-          :maxZoom="2"
-          :dblClickZoomStep="0"
-          :wheelZoomStep="0.05"
-          :pan-enabled=isPanEnabled
-          :enableControlButton="false"
-          v-model:pan="pan"
-          v-model:zoom="zoom">
-            <div id="canvas">
-              <div class="ruler-wrapper">
-                <div class="ruler horizontal">
-                  <div class="ruler-controls ruler-control" :style="{ position: 'absolute', left: rulerControl.x + 'px' }">
-                  </div>
-                  <div v-for="mark in horizontalMarks" :key="mark" class="ruler-mark" :style="{ left: mark + 'px' }">
-                    <span class="ruler-label" v-if="mark % 50 === 0">{{ mark }}</span>
-                  </div>
-                </div>
-              </div>
-              <div 
-              class="canva"
-              :style="{ 
-                width: canvasSize.width + 'px', 
-                height: canvasSize.height + 'px'
-              }"
-              @click="onCanvasClick">
-                <div 
-                v-for="el in elements"
-                :key="el.id"
-                class="container-element"
-                >
-                  <div
-                    v-if="'text' in el"
-                    class="text resizable"
-                    :data-id="el.id"
-                    :class="{ selected: selectedElement && selectedElement.id === el.id }"
-                    :style="style(el)"
-                    :contenteditable="el.isEditing"
-                    @dblclick="el.isEditing = true"
-                    @blur="el.isEditing = false"
-                    @input="inputText($event, el)"
-                    @click="selectElement(el)"
-                  >
-                  Текст
-                  </div>
-                  <table
-                   v-if="'rows' in el"
-                   contenteditable="true" 
-                   class="table-element resizable"
-                   :data-id="el.id"
-                   :style="style(el)"
-                   @input="(e) => onTableInput(e, el)">
-                    <tr v-for="(row, rowIndex) in el.rows" :key="rowIndex">
-                      <td
-                        v-for="(cell, cellIndex) in row"
-                        :key="cellIndex"
-                        contenteditable="true"
-                      >
-                        {{ cell }}
-                      </td>
-                    </tr>
-                  </table>
-                </div>
-              </div>
-            </div>
-          </VueZoomable>
-        </template>
-      </ScrollOverlay>
+        </div>
     </pane>
   </splitpanes>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onBeforeUnmount, computed } from "vue";
+import { ref, nextTick, reactive, onMounted, onBeforeUnmount, computed } from "vue";
 import { Splitpanes, Pane } from 'splitpanes';
 import 'splitpanes/dist/splitpanes.css';
 import interact from 'interactjs';
 import "vue-zoomable/dist/style.css";
 import { VueZoomable, ScrollOverlay } from "vue-zoomable";
-import { RecycleScroller } from 'vue3-virtual-scroller'
-import 'vue3-virtual-scroller/dist/vue3-virtual-scroller.css'
-import opentype from 'opentype.js'
+import { RecycleScroller } from 'vue3-virtual-scroller';
+import 'vue3-virtual-scroller/dist/vue3-virtual-scroller.css';
+import opentype from 'opentype.js';
+import Prism from 'prismjs';
+import 'prismjs/themes/prism.css';
+import JSON5 from 'json5';
+
 
 let dxsum = 0, dysum = 0;
 
@@ -261,6 +295,64 @@ const whatsMode = ref({});
 const showList = ref(false);
 
 const searchQuery = ref("");
+
+const code = ref(`{
+  "key": "value"
+}`)
+const highlightedCode = ref('')
+const error = ref('')
+
+const insertTab = (event) => {
+  const textarea = event.target
+  const start = textarea.selectionStart
+  const end = textarea.selectionEnd
+
+  // Вставляем два пробела вместо табуляции
+  code.value = code.value.substring(0, start) + '  ' + code.value.substring(end)
+  nextTick(() => {
+    textarea.selectionStart = textarea.selectionEnd = start + 2
+  })
+}
+
+const validateJSON = () => {
+  let parserCode;
+  try {
+    parserCode = JSON5.parse(code.value);
+    error.value = '';
+  } catch (err) {
+    error.value = 'Ошибка JSON: ' + err.message;
+  }
+  highlightedCode.value = Prism.highlight(code.value, Prism.languages.javascript, 'javascript');
+
+  let count = 1;
+  for (const textField in parserCode) {
+    const elDom = document.querySelector(`[data-id="${textField}"]`);
+
+    if (!elDom) {
+      addText();
+      addMode.value = false;
+
+      whatsMode.value.id = textField;
+      whatsMode.value.text = parserCode[textField];
+      whatsMode.value.x += (count*50)%canvasSize.width;
+      // console.log((Math.floor(count/canvasSize.width)*50)%canvasSize.height);
+
+      elements.value.push({ ...whatsMode.value });
+    } else {
+      const el = elements.value.find(obj => obj.id === textField);
+
+      if (!el) {
+        console.error("Не найден! Но должен был найтись");
+        return;
+      }
+      
+      el.id = textField;
+      el.text = parserCode[textField];
+    }
+
+    count++;
+  }
+}
 
 const toggleList = () => {
   showList.value = !showList.value;
@@ -398,7 +490,6 @@ const inputText = (event, el) => {
 
 const positionUpdate = () => {
   if (!selectedElement.value) return;
-
   dxsum = selectedElement.value.x;
   dysum = selectedElement.value.y;
 }
@@ -466,7 +557,7 @@ const align = (alignment) => {
     }
 
     [B.x, B.y] = [Math.floor(x), Math.floor(y)];
-    [dxsum, dysum] = [Math.floor(x), Math.floor(y)];
+    [dxsum, dysum] = [x, y];
     console.log(selectedElement.value);
 }
 
@@ -593,8 +684,6 @@ const generateHTML = () => {
           border-collapse: collapse;
         ">`;
 
-        console.log(el);
-
         el.rows.forEach((row) => {
             html += "<tr>";
             if (Array.isArray(row)) {
@@ -634,10 +723,12 @@ const generateHTML = () => {
 document.addEventListener('click', (event) => {
   if (selectedElement.value) {
     const elDom = document.querySelector(`[data-id="${selectedElement.value.id}"]`);
-    const panel = document.querySelector(`.panel`);
+    const panels = document.querySelectorAll(`.panel`);
 
-    if (panel && panel.contains(event.target)) {
-      return;
+    for (const panel of panels) {
+      if (panel && panel.contains(event.target)) {
+        return;
+      }
     }
 
     if (elDom && !elDom.contains(event.target)) {
@@ -663,7 +754,7 @@ onMounted(() => {
       move (event) {
         isPanEnabled.value = false;
 
-        rulerControl.value.x += Math.floor(event.dx / zoom.value);
+        rulerControl.value.x += event.dx / zoom.value;
 
         if (rulerControl.value.x <= 0) {
           rulerControl.value.x = 0;
@@ -728,8 +819,8 @@ onMounted(() => {
 
           selectedElement.value = el;
 
-          dxsum += Math.floor(event.dx / zoom.value);
-          dysum += Math.floor(event.dy / zoom.value);
+          dxsum += event.dx / zoom.value;
+          dysum += event.dy / zoom.value;
 
           for (const border of scope.value) {
               if (dxsum < border.x && dxsum > border.maxX) {
@@ -737,7 +828,7 @@ onMounted(() => {
                   break;
               }
               if (dxsum >= border.x || dxsum <= border.maxX) {
-                  el.x = dxsum;
+                  el.x = Math.floor(dxsum);
               }
           }
 
@@ -747,7 +838,7 @@ onMounted(() => {
                   break;
               }
               if (dysum >= border.y || dysum <= border.maxY) {
-                  el.y = dysum;
+                  el.y = Math.floor(dysum);
               }
           }
 
@@ -797,6 +888,7 @@ onMounted(() => {
   window.addEventListener('keydown', inputKey);
 
   fetchGoogleFonts("");
+  validateJSON();
 });
 
 onBeforeUnmount(() => {
@@ -890,7 +982,6 @@ onBeforeUnmount(() => {
 
 .alignment-panel {
   display: inline-flex;
-  margin-top: 20%;
   gap: 8px; /* Расстояние между группами кнопок */
   background: #2b2b2b; /* Цвет фона, похожий на темную тему Figma */
   border-radius: 6px;
@@ -908,8 +999,9 @@ onBeforeUnmount(() => {
   width: 32px;
   height: 32px;
   background: #dfdfdf;
-  background-size: 30px 30px;
-  background-size: contain;
+  background-position: center center;
+  background-size: 30px 25px;
+  background-repeat: no-repeat;
   filter: invert(1);
   border: none;
   border-radius: 4px;
@@ -1062,21 +1154,15 @@ onBeforeUnmount(() => {
   background: #555;
 }
 
-/* Ховер-эффект */
 .alignment-btn:hover {
-  background: #4c4c4c;
-}
-
-/* Активное состояние (для примера) */
-.alignment-btn:active {
-  background: #5c5c5c;
+  background-position: center calc(50% - 4px);
 }
 
 .list-container {
-  width: 240px;
-  height: 300px;
-  margin: 10px;
+  width: 100%;
+  height: 320px;
 }
+
 .font-item {
   margin-bottom: 10px; /* уменьшенный отступ между элементами */
   padding-bottom: 5px;
@@ -1088,7 +1174,8 @@ onBeforeUnmount(() => {
 .scroller {
   height: 280px; /* фиксированная высота для скролла */
   overflow-y: auto;
-  border: 1px solid #000;
+  scrollbar-width: 10px;
+  scrollbar-color: #c1c1c1 transparent;
 }
 
 .typography {
@@ -1131,7 +1218,9 @@ onBeforeUnmount(() => {
   background-color: #333; /* Или прозрачный */
   color: white;
   font-size: 16px;
+  padding: 5px;
   border: none;
+  border-radius: 4px;
   width: 80%;
 }
 
@@ -1174,6 +1263,51 @@ onBeforeUnmount(() => {
     cursor: pointer;
 }
 
+.cosmic-container {
+  max-width: 100%;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  font-family: 'Inter', sans-serif;
+}
+
+.nebula-textarea {
+  max-width: 100%;
+  width: 100%;
+  height: 100%;
+  background: #444;
+  border: none;
+  padding: 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: left;
+  font-size: 16px;
+  color: white;
+}
+
+.nebula-textarea:focus-visible {
+  border: 1px #1b1b1b solid;
+  outline: none;
+}
+
+.stellar-btn {
+  padding: 12px 20px;
+  background-color: #202020;
+  color: #ffffff;
+  font-size: 16px;
+  font-family: 'Inter', sans-serif;
+  font-weight: 600;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.stellar-btn:hover {
+  background-color: #1b1b1b;
+}
+
 .alignment-btn.left {
   background-image: url("assets/alignment-left.svg");
 }
@@ -1191,5 +1325,42 @@ onBeforeUnmount(() => {
 }
 .alignment-btn.bottom {
   background-image: url("assets/alignment-bottom.svg");
+}
+
+.add-btn-panel {
+  width: 49%;
+  height: 32px;
+  background: #202020;
+  background-position: center center;
+  background-size: 30px 20px;
+  background-repeat: no-repeat;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+}
+
+.add-text-btn {
+  background-image: url("assets/add-text.svg");
+}
+
+.add-table-btn {
+  background-image: url("assets/add-table.svg");
+}
+
+.save-html-btn {
+  width: 100%;
+  margin-top: 5px;
+  background-image: url("assets/save-html.svg");
+}
+
+.add-panel-container {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
 }
 </style>
