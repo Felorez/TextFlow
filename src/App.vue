@@ -432,7 +432,7 @@ const FontItem = {
 const fonts = ref([])
 
 // Пример запроса к Google Fonts API
-const API_KEY = 'AIzaSyAtNI3mbv91QvzmDi8SEGJCp-QDcPxMwnw'
+const API_KEY = 'YOUR_API_KEY'
 const apiUrl = `https://www.googleapis.com/webfonts/v1/webfonts?key=${API_KEY}`
 
 const fetchGoogleFonts = async (searchQuery) => {
