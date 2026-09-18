@@ -431,37 +431,59 @@ const FontItem = {
 
 const fonts = ref([])
 
-// Пример запроса к Google Fonts API
-const API_KEY = 'YOUR_API_KEY'
+// Ключ Google Fonts API берётся из .env (см. .env.example)
+const API_KEY = import.meta.env.VITE_GOOGLE_FONTS_API_KEY
 const apiUrl = `https://www.googleapis.com/webfonts/v1/webfonts?key=${API_KEY}`
+
+// Кеш полного списка шрифтов: сеть дёргается один раз,
+// поиск потом фильтрует уже загруженное
+let allFonts = null;
+
+const loadGoogleFonts = async () => {
+  if (allFonts) return allFonts;
+
+  if (!API_KEY) {
+    console.warn('VITE_GOOGLE_FONTS_API_KEY не задан — список шрифтов недоступен. См. .env.example');
+    allFonts = [];
+    return allFonts;
+  }
+
+  const response = await fetch(apiUrl)
+
+  if (!response.ok) {
+    throw new Error(`Google Fonts API вернул ${response.status}`);
+  }
+
+  const data = await response.json()
+
+  const uniqueFonts = {}
+  data.items.forEach(item => {
+    if(item.subsets && item.subsets.includes('cyrillic')){
+      if(!uniqueFonts[item.family]) {
+        uniqueFonts[item.family] = item
+      }
+    }
+  })
+
+  allFonts = Object.values(uniqueFonts)
+  .map((item, index) => ({
+    id: index,
+    family: item.family,
+    url: item.files.regular || Object.values(item.files)[0],
+    urls: item.files,
+    category: item.category,
+    samplePath: null
+  }));
+
+  return allFonts;
+}
 
 const fetchGoogleFonts = async (searchQuery) => {
   try {
-    const response = await fetch(apiUrl)
-    const data = await response.json()
+    const loaded = await loadGoogleFonts();
+    const query = (searchQuery || '').toLowerCase().trim();
 
-    const uniqueFonts = {}
-    data.items.forEach(item => {
-      if(item.subsets && item.subsets.includes('cyrillic')){
-        if(!uniqueFonts[item.family]) {
-          uniqueFonts[item.family] = item
-        }
-      }
-    })
-
-    const query = searchQuery.toLowerCase().trim();
-
-    fonts.value = Object.values(uniqueFonts)
-    .map((item, index) => ({
-      id: index,
-      family: item.family,
-      url: item.files.regular || Object.values(item.files)[0],
-      urls: item.files,
-      category: item.category,
-      samplePath: null
-    }))
-    .filter(font => !query || font.family.toLowerCase().includes(query));
-
+    fonts.value = loaded.filter(font => !query || font.family.toLowerCase().includes(query));
   } catch (error) {
     console.error('Ошибка получения списка шрифтов:', error)
   }
@@ -562,6 +584,13 @@ const align = (alignment) => {
 }
 
 const inputKey = (e) => {
+  // При редактировании текста или ячейки таблицы Delete должен стирать символ,
+  // а не удалять элемент целиком
+  const target = e.target;
+  if (target && (target.isContentEditable || target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+    return;
+  }
+
   if ((e.key === 'Delete' || e.key === 'Del') && selectedElement.value) {
     elements.value = elements.value.filter(el => el.id !== selectedElement.value.id);
     selectedElement.value = null;
@@ -643,6 +672,14 @@ const selectElement = (el) => {
   [dxsum, dysum] = [el.x, el.y];
 };
 
+// Текст элементов попадает в выгружаемый файл как есть,
+// поэтому спецсимволы нужно экранировать
+const escapeHTML = (value) => String(value ?? '')
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;');
+
 const generateHTML = () => {
   let html = `<html>
   <head>
@@ -688,7 +725,7 @@ const generateHTML = () => {
             html += "<tr>";
             if (Array.isArray(row)) {
                 row.forEach((cell) => {
-                    html += `<td style="border: 1px solid black; padding: 5px;">${cell}</td>`;
+                    html += `<td style="border: 1px solid black; padding: 5px;">${escapeHTML(cell)}</td>`;
                 });
             }
             html += "</tr>";
@@ -702,7 +739,7 @@ const generateHTML = () => {
           font-size: ${el.fontSize || 20}px; 
           font-family: ${el.fontFamily || 'sans-serif'};
           position: absolute;
-        ">${el.text}</div>\n`;
+        ">${escapeHTML(el.text)}</div>\n`;
     }
   });
 
@@ -720,7 +757,7 @@ const generateHTML = () => {
   document.body.removeChild(link);
 };
 
-document.addEventListener('click', (event) => {
+const onDocumentClick = (event) => {
   if (selectedElement.value) {
     const elDom = document.querySelector(`[data-id="${selectedElement.value.id}"]`);
     const panels = document.querySelectorAll(`.panel`);
@@ -736,7 +773,7 @@ document.addEventListener('click', (event) => {
       selectedElement.value = null;
     }
   }
-});
+};
 
 onMounted(() => {
   interact('.ruler-control')
@@ -886,6 +923,7 @@ onMounted(() => {
     invert: 'reposition'
   });
   window.addEventListener('keydown', inputKey);
+  document.addEventListener('click', onDocumentClick);
 
   fetchGoogleFonts("");
   validateJSON();
@@ -893,6 +931,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', inputKey);
+  document.removeEventListener('click', onDocumentClick);
 });
 
 </script>
