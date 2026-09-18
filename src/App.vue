@@ -264,6 +264,9 @@ import opentype from 'opentype.js';
 import Prism from 'prismjs';
 import 'prismjs/themes/prism.css';
 import JSON5 from 'json5';
+import { buildHTML } from '@/lib/htmlExport';
+import { createFontSource } from '@/lib/googleFonts';
+import { isTextEntryTarget } from '@/lib/keyboard';
 
 
 let dxsum = 0, dysum = 0;
@@ -432,58 +435,11 @@ const FontItem = {
 const fonts = ref([])
 
 // Ключ Google Fonts API берётся из .env (см. .env.example)
-const API_KEY = import.meta.env.VITE_GOOGLE_FONTS_API_KEY
-const apiUrl = `https://www.googleapis.com/webfonts/v1/webfonts?key=${API_KEY}`
-
-// Кеш полного списка шрифтов: сеть дёргается один раз,
-// поиск потом фильтрует уже загруженное
-let allFonts = null;
-
-const loadGoogleFonts = async () => {
-  if (allFonts) return allFonts;
-
-  if (!API_KEY) {
-    console.warn('VITE_GOOGLE_FONTS_API_KEY не задан — список шрифтов недоступен. См. .env.example');
-    allFonts = [];
-    return allFonts;
-  }
-
-  const response = await fetch(apiUrl)
-
-  if (!response.ok) {
-    throw new Error(`Google Fonts API вернул ${response.status}`);
-  }
-
-  const data = await response.json()
-
-  const uniqueFonts = {}
-  data.items.forEach(item => {
-    if(item.subsets && item.subsets.includes('cyrillic')){
-      if(!uniqueFonts[item.family]) {
-        uniqueFonts[item.family] = item
-      }
-    }
-  })
-
-  allFonts = Object.values(uniqueFonts)
-  .map((item, index) => ({
-    id: index,
-    family: item.family,
-    url: item.files.regular || Object.values(item.files)[0],
-    urls: item.files,
-    category: item.category,
-    samplePath: null
-  }));
-
-  return allFonts;
-}
+const fontSource = createFontSource({ apiKey: import.meta.env.VITE_GOOGLE_FONTS_API_KEY });
 
 const fetchGoogleFonts = async (searchQuery) => {
   try {
-    const loaded = await loadGoogleFonts();
-    const query = (searchQuery || '').toLowerCase().trim();
-
-    fonts.value = loaded.filter(font => !query || font.family.toLowerCase().includes(query));
+    fonts.value = await fontSource.search(searchQuery);
   } catch (error) {
     console.error('Ошибка получения списка шрифтов:', error)
   }
@@ -586,10 +542,7 @@ const align = (alignment) => {
 const inputKey = (e) => {
   // При редактировании текста или ячейки таблицы Delete должен стирать символ,
   // а не удалять элемент целиком
-  const target = e.target;
-  if (target && (target.isContentEditable || target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
-    return;
-  }
+  if (isTextEntryTarget(e.target)) return;
 
   if ((e.key === 'Delete' || e.key === 'Del') && selectedElement.value) {
     elements.value = elements.value.filter(el => el.id !== selectedElement.value.id);
@@ -672,80 +625,8 @@ const selectElement = (el) => {
   [dxsum, dysum] = [el.x, el.y];
 };
 
-// Текст элементов попадает в выгружаемый файл как есть,
-// поэтому спецсимволы нужно экранировать
-const escapeHTML = (value) => String(value ?? '')
-  .replace(/&/g, '&amp;')
-  .replace(/</g, '&lt;')
-  .replace(/>/g, '&gt;')
-  .replace(/"/g, '&quot;');
-
 const generateHTML = () => {
-  let html = `<html>
-  <head>
-    <meta charset="UTF-8">
-    <style>
-      html, body {
-        margin: 0;
-        padding: 0;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        height: 100vh;
-        background: #1e1e1e;
-      }
-      .canvas {
-        position: relative;
-        width: ${canvasSize.width}px;
-        height: ${canvasSize.height}px;
-        background: white;
-        border: 1px solid #ccc;
-      }
-      .text {
-        position: absolute;
-        white-space: pre-line;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="canvas">`;
-
-  elements.value.forEach((el) => {
-    if (el.type === "table") {
-        html += `<table class="custom-table" style="
-          left: ${el.x}px; 
-          top: ${el.y}px;
-          font-size: ${el.fontSize || 16}px;
-          font-family: ${el.fontFamily || 'sans-serif'};
-          position: absolute;
-          border-collapse: collapse;
-        ">`;
-
-        el.rows.forEach((row) => {
-            html += "<tr>";
-            if (Array.isArray(row)) {
-                row.forEach((cell) => {
-                    html += `<td style="border: 1px solid black; padding: 5px;">${escapeHTML(cell)}</td>`;
-                });
-            }
-            html += "</tr>";
-        });
-
-        html += "</table>\n";
-    } else {
-        html += `<div class="text" style="
-          left: ${el.x}px; 
-          top: ${el.y}px; 
-          font-size: ${el.fontSize || 20}px; 
-          font-family: ${el.fontFamily || 'sans-serif'};
-          position: absolute;
-        ">${escapeHTML(el.text)}</div>\n`;
-    }
-  });
-
-  html += `</div>
-  </body>
-</html>`;
+  const html = buildHTML(elements.value, canvasSize);
 
   // Создание и скачивание файла
   const blob = new Blob([html], { type: "text/html" });

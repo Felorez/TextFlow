@@ -37,6 +37,17 @@ npm run build
 npm run preview
 ```
 
+## Тесты
+
+```sh
+npm test          # разовый прогон
+npm run test:watch
+```
+
+Vitest, тесты лежат рядом с кодом в `src/lib/*.test.js`. Покрыты чистые модули:
+сборка выгружаемого HTML (`htmlExport.js`), работа со списком Google Fonts
+(`googleFonts.js`) и фильтр целей горячих клавиш (`keyboard.js`).
+
 ## Переменные окружения
 
 | Переменная                     | Назначение                                        |
